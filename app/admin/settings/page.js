@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { Input, Textarea, ImageUploader } from '@/components/admin/AdminUI';
+import { Input, Textarea, ImageUploader, Check } from '@/components/admin/AdminUI';
 
 export default function SettingsAdmin() {
   const [form, setForm] = useState(null);
@@ -63,6 +63,15 @@ export default function SettingsAdmin() {
           <Input label="LinkedIn URL" value={form.social?.linkedin || ''} onChange={(e) => setSocial('linkedin', e.target.value)} />
           <Input label="Telegram URL" value={form.social?.telegram || ''} onChange={(e) => setSocial('telegram', e.target.value)} />
         </div>
+      </div>
+
+      <div className="a-panel">
+        <h3>Payments <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--a-muted)' }}>(shown at checkout)</span></h3>
+        <div className="a-form">
+          <div className="a-field full"><Check label="Cash on Delivery (COD) enabled" checked={form.codEnabled !== false} onChange={(v) => set('codEnabled', v)} /></div>
+          <div className="a-field full"><Check label="Online payment (Razorpay) enabled" checked={form.onlinePaymentEnabled !== false} onChange={(v) => set('onlinePaymentEnabled', v)} /></div>
+        </div>
+        <div className="a-note" style={{ marginTop: 8 }}>Online payment also needs Razorpay keys set in the backend .env to actually charge cards.</div>
       </div>
 
       <div className="a-panel">

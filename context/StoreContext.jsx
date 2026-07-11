@@ -18,6 +18,8 @@ export function StoreProvider({ initialSettings, children }) {
   const [activeCategory, setActiveCategory] = useState(null); // slug/name
   const [activeProduct, setActiveProduct] = useState(null);   // full product for detail page
   const [productsByCode, setProductsByCode] = useState({});
+  const [authUser, setAuthUser] = useState(null);   // logged-in customer
+  const [myOrders, setMyOrders] = useState([]);
 
   // hydrate persisted cart/wishlist
   useEffect(() => {
@@ -33,6 +35,15 @@ export function StoreProvider({ initialSettings, children }) {
   useEffect(() => {
     if (!settings) api.get('/settings').then(setSettings).catch(() => {});
   }, [settings]);
+
+  // hydrate logged-in customer from a stored token
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!localStorage.getItem('aligaah_token')) return;
+    api.get('/auth/me', true)
+      .then((u) => setAuthUser(u))
+      .catch(() => localStorage.removeItem('aligaah_token'));
+  }, []);
 
   const registerProducts = useCallback((list) => {
     if (!list || !list.length) return;
@@ -84,6 +95,33 @@ export function StoreProvider({ initialSettings, children }) {
     });
   }, [toast]);
 
+  // ---- auth (customer accounts) ----
+  const saveAuth = useCallback((data) => {
+    localStorage.setItem('aligaah_token', data.token);
+    setAuthUser({ _id: data._id, name: data.name, email: data.email, role: data.role, phone: data.phone });
+  }, []);
+  const login = useCallback(async (email, password) => {
+    const d = await api.post('/auth/login', { email, password });
+    saveAuth(d); toast('Welcome back!'); return d;
+  }, [saveAuth, toast]);
+  const register = useCallback(async (name, email, password) => {
+    const d = await api.post('/auth/register', { name, email, password });
+    saveAuth(d); toast('Account created'); return d;
+  }, [saveAuth, toast]);
+  const logout = useCallback(() => {
+    localStorage.removeItem('aligaah_token'); setAuthUser(null); setMyOrders([]); toast('Logged out');
+  }, [toast]);
+  const forgotPassword = useCallback((email) => api.post('/auth/forgot-password', { email }), []);
+  const verifyOtp = useCallback((email, otp) => api.post('/auth/verify-otp', { email, otp }), []);
+  const resetPassword = useCallback(async (email, otp, password) => {
+    const d = await api.post('/auth/reset-password', { email, otp, password });
+    saveAuth(d); toast('Password set — you are logged in'); return d;
+  }, [saveAuth, toast]);
+  const fetchMyOrders = useCallback(() => {
+    if (typeof window === 'undefined' || !localStorage.getItem('aligaah_token')) return;
+    api.get('/orders/mine', true).then(setMyOrders).catch(() => {});
+  }, []);
+
   // ---- navigation between in-app views ----
   const goHome = useCallback(() => { setView(null); if (typeof window !== 'undefined') window.scrollTo({ top: 0 }); }, []);
   const openCategory = useCallback((slug, name) => {
@@ -114,6 +152,7 @@ export function StoreProvider({ initialSettings, children }) {
     productsByCode, registerProducts,
     toastMsg, toast,
     view, setView, activeCategory, activeProduct, goHome, openCategory, openView, openProduct,
+    authUser, myOrders, login, register, logout, forgotPassword, verifyOtp, resetPassword, fetchMyOrders,
   };
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }

@@ -13,6 +13,7 @@ export default function Storefront() {
     settings, cart, cartCount, cartTotal, changeQty, removeFromCart, clearCart,
     wishlist, toggleWish, addToCart, productsByCode, registerProducts, toast, toastMsg,
     view, goHome, openCategory, openView, openProduct, activeCategory, activeProduct,
+    authUser, myOrders, login, register, logout, forgotPassword, resetPassword, fetchMyOrders,
   } = store;
 
   const [hero, setHero] = useState(null);
@@ -38,6 +39,13 @@ export default function Storefront() {
   const [payMethod, setPayMethod] = useState('razorpay');
   const [placing, setPlacing] = useState(false);
   const [orderDone, setOrderDone] = useState(null);
+
+  // auth UI
+  const [authMode, setAuthMode] = useState('login'); // login | register | forgot | reset
+  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '', otp: '' });
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authErr, setAuthErr] = useState('');
+  const [devOtp, setDevOtp] = useState('');
 
   // ---------- data ----------
   useEffect(() => {
@@ -66,6 +74,9 @@ export default function Storefront() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [view, goHome]);
+
+  // load the customer's orders when they open the account page while logged in
+  useEffect(() => { if (view === 'account' && authUser) fetchMyOrders(); }, [view, authUser, fetchMyOrders]);
 
   const arrivals = useMemo(() => {
     if (arrivalFilter === 'featured') return products.filter((p) => p.isFeatured);
@@ -111,9 +122,14 @@ export default function Storefront() {
     trackScreen('Search: ' + searchQuery, '/search');
     window.scrollTo({ top: 0 });
   };
+  const codOn = (settings?.codEnabled) !== false;
+  const onlineOn = (settings?.onlinePaymentEnabled) !== false;
+
   const goCheckout = () => {
     if (!cart.length) { toast('Your cart is empty'); return; }
     setOrderDone(null);
+    if (authUser) setCheckoutForm((f) => ({ ...f, name: f.name || authUser.name || '', email: f.email || authUser.email || '', phone: f.phone || authUser.phone || '' }));
+    setPayMethod(onlineOn ? 'razorpay' : 'cod');
     openView('checkout', 'Checkout');
   };
 
@@ -160,9 +176,9 @@ export default function Storefront() {
     };
     try {
       if (payMethod === 'razorpay') {
-        const init = await api.post('/orders/razorpay', payload);
+        const init = await api.post('/orders/razorpay', payload, true);
         if (init.disabled) {
-          const order = await api.post('/orders', { ...payload, paymentMethod: 'COD' });
+          const order = await api.post('/orders', { ...payload, paymentMethod: 'COD' }, true);
           toast('Online payment not configured — placed as Cash on Delivery');
           finishOrder(order);
           return;
@@ -180,7 +196,7 @@ export default function Storefront() {
           theme: { color: '#B0902F' },
           handler: async (resp) => {
             try {
-              const order = await api.post('/orders/verify', { ...payload, ...resp });
+              const order = await api.post('/orders/verify', { ...payload, ...resp }, true);
               finishOrder(order);
             } catch (e) { toast(e.message || 'Payment verification failed'); setPlacing(false); }
           },
@@ -188,7 +204,7 @@ export default function Storefront() {
         });
         rzp.open();
       } else {
-        const order = await api.post('/orders', { ...payload, paymentMethod: 'COD' });
+        const order = await api.post('/orders', { ...payload, paymentMethod: 'COD' }, true);
         finishOrder(order);
       }
     } catch (e) {
@@ -196,6 +212,19 @@ export default function Storefront() {
       setPlacing(false);
     }
   };
+
+  // ---- auth handlers ----
+  const setAf = (k, v) => setAuthForm((f) => ({ ...f, [k]: v }));
+  const runAuth = async (fn) => { setAuthBusy(true); setAuthErr(''); try { await fn(); } catch (e) { setAuthErr(e.message || 'Something went wrong'); } finally { setAuthBusy(false); } };
+  const doLogin = () => runAuth(() => login(authForm.email, authForm.password));
+  const doRegister = () => runAuth(() => register(authForm.name, authForm.email, authForm.password));
+  const doForgot = () => runAuth(async () => {
+    const r = await forgotPassword(authForm.email);
+    setDevOtp(r.devOtp || '');
+    setAuthMode('reset');
+    toast('Verification code sent');
+  });
+  const doReset = () => runAuth(() => resetPassword(authForm.email, authForm.otp, authForm.password));
 
   const homeVisible = !view && !searchActive;
 
@@ -233,6 +262,10 @@ export default function Storefront() {
           </button>
           <button className="icon-btn" onClick={() => { setSearchOpen(true); setTimeout(() => document.getElementById('searchInput')?.focus(), 150); }}>
             <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" /></svg>
+          </button>
+          <button className="icon-btn acct-btn" title={authUser ? authUser.name : 'Account'} onClick={() => openView('account', 'Account')}>
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></svg>
+            {authUser ? <span className="badge dot" /> : null}
           </button>
         </div>
       </header>
@@ -469,14 +502,19 @@ export default function Storefront() {
                     <div className="field"><label>Pincode *</label><input value={checkoutForm.pincode} onChange={(e) => setCheckoutForm((f) => ({ ...f, pincode: e.target.value }))} /></div>
                   </div>
                   <h3 style={{ marginTop: 20 }}>Payment method</h3>
-                  <label className={`pay-opt ${payMethod === 'razorpay' ? 'sel' : ''}`}>
-                    <input type="radio" name="pay" checked={payMethod === 'razorpay'} onChange={() => setPayMethod('razorpay')} />
-                    <span><b>Pay online</b><em>UPI · Cards · Netbanking (Razorpay)</em></span>
-                  </label>
-                  <label className={`pay-opt ${payMethod === 'cod' ? 'sel' : ''}`}>
-                    <input type="radio" name="pay" checked={payMethod === 'cod'} onChange={() => setPayMethod('cod')} />
-                    <span><b>Cash on Delivery</b><em>Pay when it arrives</em></span>
-                  </label>
+                  {onlineOn ? (
+                    <label className={`pay-opt ${payMethod === 'razorpay' ? 'sel' : ''}`}>
+                      <input type="radio" name="pay" checked={payMethod === 'razorpay'} onChange={() => setPayMethod('razorpay')} />
+                      <span><b>Pay online</b><em>UPI · Cards · Netbanking (Razorpay)</em></span>
+                    </label>
+                  ) : null}
+                  {codOn ? (
+                    <label className={`pay-opt ${payMethod === 'cod' ? 'sel' : ''}`}>
+                      <input type="radio" name="pay" checked={payMethod === 'cod'} onChange={() => setPayMethod('cod')} />
+                      <span><b>Cash on Delivery</b><em>Pay when it arrives</em></span>
+                    </label>
+                  ) : null}
+                  {!onlineOn && !codOn ? <div className="auth-note">No payment methods are currently available. Please check back soon.</div> : null}
                 </div>
                 <div className="checkout-summary">
                   <h3>Order summary</h3>
@@ -578,23 +616,82 @@ export default function Storefront() {
         <section>
           <div className="view-head">
             <button className="view-back" onClick={goHome}><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" /></svg> BACK</button>
-            <span className="view-htitle">My Account</span><span style={{ width: 64 }} />
+            <span className="view-htitle">{authUser ? 'My Account' : 'Sign In'}</span><span style={{ width: 64 }} />
           </div>
-          <div className="page-banner"><div className="eyebrow">Welcome</div><h2>My Account</h2></div>
+          <div className="page-banner">
+            <div className="eyebrow">{authUser ? `Hello, ${authUser.name}` : 'Welcome'}</div>
+            <h2>{authUser ? 'My Account' : 'Account'}</h2>
+          </div>
           <div className="page-body">
-            <div className="account-wrap">
-              <div className="field"><label>Email address</label><input type="email" placeholder="you@example.com" /></div>
-              <div className="field"><label>Password</label><input type="password" placeholder="••••••••" /></div>
-              <button className="btn-primary" onClick={() => toast('Signed in (demo)')}>SIGN IN</button>
-              <div className="acct-alt">New here? <a href="#" style={{ color: 'var(--gold-500)', fontWeight: 600 }} onClick={(e) => { e.preventDefault(); toast('Registration (demo)'); }}>Create an account</a></div>
-              <ul className="acct-menu">
-                <li><a href="#" onClick={(e) => { e.preventDefault(); toast('No orders yet'); }}>My Orders <span>›</span></a></li>
-                <li><a href="#" onClick={(e) => { e.preventDefault(); openView('wishlist', 'Wishlist'); }}>My Wishlist <span>›</span></a></li>
-                <li><a href="#" onClick={(e) => { e.preventDefault(); toast('Saved addresses (demo)'); }}>Saved Addresses <span>›</span></a></li>
-                <li><a href="#" onClick={(e) => { e.preventDefault(); toast('Track order (demo)'); }}>Track Order <span>›</span></a></li>
-                <li><a href="#" onClick={(e) => { e.preventDefault(); toast('Logged out (demo)'); }}>Log Out <span>›</span></a></li>
-              </ul>
-            </div>
+            {authUser ? (
+              <div className="account-wrap" style={{ maxWidth: 720 }}>
+                <div className="acct-profile">
+                  <div className="acct-av">{(authUser.name || 'U')[0].toUpperCase()}</div>
+                  <div className="acct-who"><b>{authUser.name}</b><span>{authUser.email}</span></div>
+                  <button className="btn-outline acct-logout" onClick={logout}>Log out</button>
+                </div>
+                <h3 className="acct-h3">Order history</h3>
+                {myOrders.length ? (
+                  <div className="order-list">
+                    {myOrders.map((o) => (
+                      <div className="order-card" key={o._id}>
+                        <div className="oc-top">
+                          <span className="oc-id">#{o._id.slice(-8).toUpperCase()}</span>
+                          <span className={`oc-status s-${o.status}`}>{o.status}</span>
+                        </div>
+                        <div className="oc-items">{o.items.map((it) => `${it.title} × ${it.qty}`).join(', ')}</div>
+                        <div className="oc-bot">
+                          <span>{new Date(o.createdAt).toLocaleDateString()}</span>
+                          <span className="oc-pay">{o.isPaid ? 'Paid online' : o.paymentMethod}</span>
+                          <b>{fmt(o.grandTotal)}</b>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : <div className="page-empty" style={{ padding: '28px 0' }}>No orders yet — start shopping!</div>}
+              </div>
+            ) : (
+              <div className="account-wrap">
+                {authErr ? <div className="auth-err">{authErr}</div> : null}
+
+                {authMode === 'login' && (<>
+                  <div className="field"><label>Email address</label><input type="email" value={authForm.email} onChange={(e) => setAf('email', e.target.value)} placeholder="you@example.com" /></div>
+                  <div className="field"><label>Password</label><input type="password" value={authForm.password} onChange={(e) => setAf('password', e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === 'Enter' && doLogin()} /></div>
+                  <button className="btn-primary" disabled={authBusy} onClick={doLogin}>{authBusy ? 'Signing in…' : 'SIGN IN'}</button>
+                  <div className="acct-links">
+                    <a href="#" onClick={(e) => { e.preventDefault(); setAuthErr(''); setAuthMode('forgot'); }}>Forgot password?</a>
+                    <a href="#" onClick={(e) => { e.preventDefault(); setAuthErr(''); setAuthMode('register'); }}>Create account</a>
+                  </div>
+                </>)}
+
+                {authMode === 'register' && (<>
+                  <div className="field"><label>Full name</label><input value={authForm.name} onChange={(e) => setAf('name', e.target.value)} placeholder="Your name" /></div>
+                  <div className="field"><label>Email address</label><input type="email" value={authForm.email} onChange={(e) => setAf('email', e.target.value)} placeholder="you@example.com" /></div>
+                  <div className="field"><label>Password</label><input type="password" value={authForm.password} onChange={(e) => setAf('password', e.target.value)} placeholder="min 6 characters" /></div>
+                  <button className="btn-primary" disabled={authBusy} onClick={doRegister}>{authBusy ? 'Creating…' : 'CREATE ACCOUNT'}</button>
+                  <div className="acct-links"><a href="#" onClick={(e) => { e.preventDefault(); setAuthErr(''); setAuthMode('login'); }}>Already have an account? Sign in</a></div>
+                </>)}
+
+                {authMode === 'forgot' && (<>
+                  <p className="auth-note">Enter your email and we'll send a 6-digit verification code.</p>
+                  <div className="field"><label>Email address</label><input type="email" value={authForm.email} onChange={(e) => setAf('email', e.target.value)} placeholder="you@example.com" /></div>
+                  <button className="btn-primary" disabled={authBusy} onClick={doForgot}>{authBusy ? 'Sending…' : 'SEND CODE'}</button>
+                  <div className="acct-links"><a href="#" onClick={(e) => { e.preventDefault(); setAuthErr(''); setAuthMode('login'); }}>Back to sign in</a></div>
+                </>)}
+
+                {authMode === 'reset' && (<>
+                  <p className="auth-note">Enter the code sent to <b>{authForm.email}</b> and choose a new password.</p>
+                  {devOtp ? <div className="auth-devotp">Dev code (email not configured): <b>{devOtp}</b></div> : null}
+                  <div className="field"><label>Verification code</label><input value={authForm.otp} onChange={(e) => setAf('otp', e.target.value)} placeholder="6-digit code" /></div>
+                  <div className="field"><label>New password</label><input type="password" value={authForm.password} onChange={(e) => setAf('password', e.target.value)} placeholder="min 6 characters" /></div>
+                  <button className="btn-primary" disabled={authBusy} onClick={doReset}>{authBusy ? 'Saving…' : 'RESET PASSWORD'}</button>
+                  <div className="acct-links">
+                    <a href="#" onClick={(e) => { e.preventDefault(); doForgot(); }}>Resend code</a>
+                    <a href="#" onClick={(e) => { e.preventDefault(); setAuthErr(''); setAuthMode('login'); }}>Back to sign in</a>
+                  </div>
+                </>)}
+              </div>
+            )}
           </div>
         </section>
       )}
